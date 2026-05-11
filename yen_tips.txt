@@ -1,0 +1,20 @@
+05/10 
+建立conda環境 & MySQL安裝設定
+
+05/11
+已完成 planner.py (planner node)
+
+建立 MySQL 資料庫格式指令
+
+使用已建立好的 MySQL 使用者載入 .sql 檔案: (位置記得換)
+mysql -h 127.0.0.1 -P 3306 -u ics_agent -p < /home/user/Documents/AI_agent/Intelligent-Customer-Service-Agent/schema.sql
+
+專案帳號登入:
+mysql -h 127.0.0.1 -P 3306 -u ics_agent -p intelligent_customer_service
+
+測試看看有沒有:
+SHOW TABLES;
+SELECT * FROM customers;
+SELECT * FROM orders;
+
+
