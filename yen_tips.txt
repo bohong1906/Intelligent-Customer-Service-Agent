@@ -18,3 +18,10 @@ SELECT * FROM customers;
 SELECT * FROM orders;
 
 
+05/13
+新增STM功能
+  - 建立 LangGraph 的 MemorySaver checkpointer
+  - 產生同一輪對話用的 session_id & thread_id 設定
+  - checkpointer 包含 recent messages , tool outputs
+  - 接起來讓 planner , react 都吃的到 stm
+  - planner 部份是先用 messages 傳進去之後，用 format_recent_messages 理解成簡短的文字，再放入 planner 的 prompt

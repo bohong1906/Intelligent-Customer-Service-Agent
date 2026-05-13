@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 
 import dotenv
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 
 # Load environment variables from .env
@@ -92,6 +93,34 @@ def coerce_int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def format_recent_messages(messages: list[Any], limit: int = 6) -> str:
+    """Convert recent chat history into short text for the planner."""
+    formatted: list[str] = []
+
+    for message in messages[-limit:]:
+        if not isinstance(message, BaseMessage):
+            continue
+
+        if isinstance(message, HumanMessage):
+            role = "User"
+        elif isinstance(message, AIMessage):
+            role = "Assistant"
+        elif isinstance(message, ToolMessage):
+            role = "Tool"
+        else:
+            role = "Message"
+
+        content = message.content
+        if isinstance(content, list):
+            content = " ".join(str(item) for item in content)
+
+        text = str(content).strip()
+        if text:
+            formatted.append(f"{role}: {text}")
+
+    return "\n".join(formatted)
 
 
 # Build a safe fallback result if the LLM output is malformed
@@ -183,6 +212,7 @@ def normalize_planner_result(user_text: str, parsed: dict[str, Any]) -> PlannerR
 # Main planner node for intent extraction and action planning
 def planner_node(state: dict[str, Any]) -> PlannerResult:
     user_text = str(state.get("input", "")).strip()
+    recent_context = format_recent_messages(state.get("messages", []))
     llm = get_planner_llm()
 
     # Tell the model to return only the planning result in JSON
@@ -239,7 +269,13 @@ Rules:
 - Do not include extra keys
 """.strip()
 
-    human_prompt = f"User input: {user_text}"
+    human_prompt = f"""
+Recent conversation:
+{recent_context or "(no prior conversation)"}
+
+Current user input:
+{user_text}
+""".strip()
 
     try:
         response = llm.invoke(
