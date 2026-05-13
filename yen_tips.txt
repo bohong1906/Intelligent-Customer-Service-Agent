@@ -7,7 +7,7 @@
 建立 MySQL 資料庫格式指令
 
 使用已建立好的 MySQL 使用者載入 .sql 檔案: (位置記得換)
-mysql -h 127.0.0.1 -P 3306 -u ics_agent -p < /home/user/Documents/AI_agent/Intelligent-Customer-Service-Agent/schema.sql
+mysql -h 127.0.0.1 -P 3306 -u ics_agent -p < /home/hislab/Intelligent-Customer-Service-Agent/schema.sql
 
 專案帳號登入:
 mysql -h 127.0.0.1 -P 3306 -u ics_agent -p intelligent_customer_service

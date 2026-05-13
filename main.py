@@ -1,81 +1,96 @@
 from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph , START , END
-from typing import TypedDict
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from typing import Annotated, Any, TypedDict
+import json
 import os
 import dotenv
+import readline
 from planner import planner_node
+from tools import CUSTOMER_SERVICE_TOOLS
 
 
 # Load environment variables from .env
 dotenv.load_dotenv()
 
 # Define which LLM model to use
-MODEL = "gpt-4o"
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
-# Read the user's question from the terminal
-user_input = input("Please enter your query: ")
-
-# Create the LLM client
+# Create the LLM client and bind tools for ReAct tool calling
 llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_KEY"),
     base_url=os.getenv("OPENAI_BASE"),
-    model=MODEL
-)
+    model=MODEL,
+    temperature=0,
+).bind_tools(CUSTOMER_SERVICE_TOOLS)
+
 
 # Define the shared state used across the workflow
 class AgentState(TypedDict):
-    input:str
-    intent:str
-    order_id:int | None
-    product:str | None
-    date:str | None
-    plan:str
-    tool_result:str
-    final_answer:str
-    verified:bool
+    input: str
+    planner_result: dict[str, Any]
+    messages: Annotated[list, add_messages]
 
-# Planner node is now imported from planner.py
 
-# Tool node: simulate tool execution or external actions
-def tool_node(state:AgentState):
-    prompt = f""
-    tool_result = llm.invoke(prompt).content
-    return {"tool_result":tool_result}
+SYSTEM_PROMPT = """
+You are an intelligent customer service ReAct agent.
 
-# Verifier node: check whether the result is acceptable
-def verifier_node(state:AgentState):
-    prompt = f""
-    verification = llm.invoke(prompt).content
-    return {"verified":verification == "yes"}
+Use the planner result as guidance, but use tool results as the source of truth.
+Use tools for order status, customer profile, refund requests, and complaints.
+Do not invent database facts.
+If a tool returns an error, explain it clearly.
+Keep the final response concise and customer-friendly.
+""".strip()
+
+
+# Planner node: understand intent and create high-level execution guidance
+def planner(state: AgentState):
+    result = planner_node({"input": state["input"]})
+    return {"planner_result": result}
+
+
+# Agent node: reason with planner output and decide whether to call tools
+def react(state: AgentState):
+    planner_context = json.dumps(
+        state.get("planner_result", {}),
+        indent=2,
+        ensure_ascii=False,
+    )
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=f"Planner result:\n{planner_context}"),
+        *state["messages"],
+    ]
+    response = llm.invoke(messages)
+    return {"messages": [response]}
+
 
 def main():
-    # Build the LangGraph workflow
+    user_input = input("Please enter your query: ")
+
+    # Build the LangGraph ReAct workflow
     builder = StateGraph(AgentState)
-    builder.add_node("planner", planner_node)
+    builder.add_node("planner", planner)
+    builder.add_node("react", react)
+    builder.add_node("tools", ToolNode(CUSTOMER_SERVICE_TOOLS))
     builder.add_edge(START, "planner")
-    builder.add_edge("planner", END)
+    builder.add_edge("planner", "react")
+    builder.add_conditional_edges(
+        "react",
+        tools_condition,
+        {"tools": "tools", END: END},
+    )
+    builder.add_edge("tools", "react")
 
-    # Keep these nodes for the next workflow steps
-    # builder.add_node("tool", tool_node)
-    # builder.add_node("verifier", verifier_node)
-    # builder.add_edge("planner", "tool")
-    # builder.add_edge("tool", "verifier")
-    # builder.add_edge("verifier", END)
-
-    # Compile and run the planner-only workflow
     graph = builder.compile()
-    result = graph.invoke({"input": user_input})
+    result = graph.invoke({
+        "input": user_input,
+        "messages": [HumanMessage(content=user_input)],
+    })
 
-    # Print the planner output for quick testing
-    print("Planner output:")
-    print(result)
-
-    # Temporary direct LLM call for basic response testing
-    # response = llm.invoke([
-    #     ("system", "You are a helpful assistant."),
-    #     ("human", user_input)
-    # ])
-    # print(response.content)
+    print(result["messages"][-1].content)
 
 
 if __name__ == "__main__":

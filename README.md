@@ -113,6 +113,25 @@ Then install dependencies:
 
 ```bash
 cd Intelligent-Customer-Service-Agent
-pip install -m -r requirements.txt
+pip install -r requirements.txt
 ```
 
+### 2. Run the Planner + ReAct Agent
+
+After MySQL and `.env` are configured, run:
+
+```bash
+python main.py
+```
+
+Example query:
+
+```text
+Check status of order 1001
+```
+
+The runtime flow is:
+
+```text
+User Input -> Planner Node -> ReAct Assistant Node -> Tools Node -> ReAct Assistant Node -> Final Response
+```
