@@ -6,6 +6,7 @@ from typing import Any, TypedDict
 import dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from ltm import get_current_customer_id, read_ltm_context
 
 
 # Load environment variables from .env
@@ -15,6 +16,7 @@ dotenv.load_dotenv()
 class PlannerResult(TypedDict):
     input: str
     intent: str
+    customer_id: int | None
     order_id: int | None
     product: str | None
     date: str | None
@@ -24,6 +26,7 @@ class PlannerResult(TypedDict):
     plan: list[str]
     missing_info: list[str]
     safety_notes: list[str]
+    ltm: dict[str, Any] | None
 
 
 VALID_INTENTS = {
@@ -95,6 +98,11 @@ def coerce_int_or_none(value: Any) -> int | None:
         return None
 
 
+def extract_order_id(text: str) -> int | None:
+    match = re.search(r"\b\d+\b", text)
+    return int(match.group()) if match else None
+
+
 def format_recent_messages(messages: list[Any], limit: int = 6) -> str:
     """Convert recent chat history into short text for the planner."""
     formatted: list[str] = []
@@ -125,8 +133,8 @@ def format_recent_messages(messages: list[Any], limit: int = 6) -> str:
 
 # Build a safe fallback result if the LLM output is malformed
 def fallback_result(user_text: str) -> PlannerResult:
-    order_match = re.search(r"\b\d+\b", user_text)
-    order_id = int(order_match.group()) if order_match else None
+    order_id = extract_order_id(user_text)
+    customer_id = get_current_customer_id()
     lowered = user_text.lower()
 
     if "refund" in lowered:
@@ -143,11 +151,13 @@ def fallback_result(user_text: str) -> PlannerResult:
     return {
         "input": user_text,
         "intent": intent,
+        "customer_id": customer_id,
         "order_id": order_id,
         "product": None,
         "date": None,
         "entities": {
             "order_id": order_id,
+            "customer_id": customer_id,
             "product": None,
             "date": None,
         },
@@ -163,6 +173,7 @@ def fallback_result(user_text: str) -> PlannerResult:
             "Do not invent database facts.",
             "Do not claim an update succeeded unless the tool result confirms it.",
         ],
+        "ltm": None,
     }
 
 
@@ -176,6 +187,11 @@ def normalize_planner_result(user_text: str, parsed: dict[str, Any]) -> PlannerR
         intent = "general_question"
 
     order_id = coerce_int_or_none(parsed.get("order_id", entities.get("order_id")))
+    customer_id = coerce_int_or_none(
+        parsed.get("customer_id", entities.get("customer_id"))
+    )
+    if customer_id is None:
+        customer_id = get_current_customer_id()
     product = parsed.get("product", entities.get("product"))
     date = parsed.get("date", entities.get("date"))
     requires_tools = bool(parsed.get("requires_tools", intent in TOOL_REQUIRED_INTENTS))
@@ -193,11 +209,13 @@ def normalize_planner_result(user_text: str, parsed: dict[str, Any]) -> PlannerR
     return {
         "input": user_text,
         "intent": intent,
+        "customer_id": customer_id,
         "order_id": order_id,
         "product": product,
         "date": date,
         "entities": {
             "order_id": order_id,
+            "customer_id": customer_id,
             "product": product,
             "date": date,
         },
@@ -206,6 +224,7 @@ def normalize_planner_result(user_text: str, parsed: dict[str, Any]) -> PlannerR
         "plan": coerce_list(parsed.get("plan")),
         "missing_info": coerce_list(parsed.get("missing_info")),
         "safety_notes": coerce_list(parsed.get("safety_notes")),
+        "ltm": None,
     }
 
 
@@ -214,6 +233,13 @@ def planner_node(state: dict[str, Any]) -> PlannerResult:
     user_text = str(state.get("input", "")).strip()
     recent_context = format_recent_messages(state.get("messages", []))
     llm = get_planner_llm()
+    seed_order_id = extract_order_id(user_text)
+    current_customer_id = get_current_customer_id()
+    ltm_context = read_ltm_context(
+        order_id=seed_order_id,
+        customer_id=current_customer_id,
+    )
+    ltm_text = json.dumps(ltm_context, indent=2)
 
     # Tell the model to return only the planning result in JSON
     system_prompt = """
@@ -235,10 +261,12 @@ Valid intents:
 Return JSON only with this exact structure:
 {
   "intent": "refund_order",
+  "customer_id": 1,
   "order_id": 1001,
   "product": null,
   "date": null,
   "entities": {
+    "customer_id": 1,
     "order_id": 1001,
     "product": null,
     "date": null
@@ -259,6 +287,8 @@ Return JSON only with this exact structure:
 
 Rules:
 - Use null if no order id is present
+- Use the current customer id when the user says "my", "me", or does not provide a customer id
+- Use null if no customer id is available
 - Use null if product is not mentioned
 - Use null if date is not mentioned
 - Keep the plan short and practical
@@ -273,6 +303,12 @@ Rules:
 Recent conversation:
 {recent_context or "(no prior conversation)"}
 
+Long-term memory (if available):
+{ltm_text}
+
+Current customer id:
+{current_customer_id}
+
 Current user input:
 {user_text}
 """.strip()
@@ -285,6 +321,17 @@ Current user input:
             ]
         )
         parsed = parse_planner_output(response.content)
-        return normalize_planner_result(user_text, parsed)
+        result = normalize_planner_result(user_text, parsed)
     except Exception:
-        return fallback_result(user_text)
+        result = fallback_result(user_text)
+
+    final_order_id = result.get("order_id")
+    result_customer_id = result.get("customer_id")
+    if final_order_id != seed_order_id or result_customer_id != current_customer_id:
+        ltm_context = read_ltm_context(
+            order_id=final_order_id,
+            customer_id=result_customer_id,
+        )
+
+    result["ltm"] = ltm_context
+    return result

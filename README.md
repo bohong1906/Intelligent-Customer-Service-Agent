@@ -1,5 +1,28 @@
 # Intelligent-Customer-Service-Agent
 
+This project implements an Intelligent Customer Service Agent with:
+
+- LangGraph workflow
+- ReAct-style tool calling
+- MySQL-backed customer/order/complaint data
+- Short-term memory through LangGraph checkpointer
+- Long-term memory through MySQL
+- Verifier loop for tool outputs and final responses
+
+Current runtime flow:
+
+```text
+User Input
+-> Planner Node
+-> ReAct Agent Node
+-> Tool Node? 
+   yes -> Verifier Node -> ReAct Agent Node
+   no  -> Verifier Node -> Long-Term Memory Write Node -> END
+```
+
+The `ReAct Agent Node` is responsible for both tool decisions and final customer-facing
+responses. There is no separate final-response node.
+
 ## MySQL Installation
 
 This project uses MySQL as the structured database for customer profiles, orders,
@@ -97,10 +120,12 @@ Port: 3306
 User Name: ics_agent
 Default Schema: intelligent_customer_service
 ```
-## Environment Setup
-This part will perform this project environment set-up steps.
 
-### 1. Create a Conda Environmet
+## Environment Setup
+
+This part performs the project environment setup.
+
+### 1. Create a Conda Environment
 
 First we create a conda env:
 
@@ -116,11 +141,79 @@ cd Intelligent-Customer-Service-Agent
 pip install -r requirements.txt
 ```
 
-### 2. Run the Planner + ReAct Agent
+### 2. Configure `.env`
+
+Create `.env` in the project root:
+
+```env
+OPENAI_KEY=your_openai_or_azure_openai_key
+OPENAI_BASE=https://your-resource.openai.azure.com/openai/v1
+OPENAI_MODEL=gpt-4o
+OPENAI_VERIFIER_MODEL=gpt-4o
+
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=ics_agent
+DB_PASSWORD=your_mysql_password
+DB_NAME=intelligent_customer_service
+
+CURRENT_CUSTOMER_ID=1
+MAX_TOOL_ITERATIONS=4
+MAX_RESPONSE_REVISIONS=2
+```
+
+Notes:
+
+- `OPENAI_MODEL` is used by planner and ReAct agent.
+- `OPENAI_VERIFIER_MODEL` is used by verifier.
+- `CURRENT_CUSTOMER_ID` is the active customer for demo queries like `Show my profile`.
+- `MAX_TOOL_ITERATIONS` prevents infinite tool loops.
+- `MAX_RESPONSE_REVISIONS` prevents infinite response-revision loops.
+- Do not commit a real `.env` with actual keys or passwords.
+
+### 3. Rebuild MySQL Data
+
+If the database is empty, this is enough:
+
+```bash
+mysql -h 127.0.0.1 -P 3306 -u ics_agent -p intelligent_customer_service < schema.sql
+```
+
+If the tables already exist, first drop the project tables to avoid duplicate index errors:
+
+```bash
+mysql -h 127.0.0.1 -P 3306 -u ics_agent -p intelligent_customer_service
+```
+
+Then run:
+
+```sql
+SET FOREIGN_KEY_CHECKS=0;
+DROP TABLE IF EXISTS customer_memory, complaints, orders, customers;
+SET FOREIGN_KEY_CHECKS=1;
+SOURCE /home/hislab/Intelligent-Customer-Service-Agent/schema.sql;
+```
+
+Check the seed data:
+
+```sql
+SELECT * FROM customers;
+SELECT * FROM orders;
+```
+
+Expected seed orders:
+
+```text
+1001 -> Alice Chen -> Keyboard -> shipped
+2222 -> Bob Lin    -> Monitor  -> processing
+```
+
+### 4. Run the Planner + ReAct Agent
 
 After MySQL and `.env` are configured, run:
 
 ```bash
+conda activate ics-agent
 python main.py
 ```
 
@@ -130,8 +223,46 @@ Example query:
 Check status of order 1001
 ```
 
-The runtime flow is:
+### 5. Local Checks
+
+## Demo Test Flow
+
+Run these in the same `python main.py` session so STM can carry context across turns.
 
 ```text
-User Input -> Planner Node -> ReAct Assistant Node -> Tools Node -> ReAct Assistant Node -> Final Response
+Where is my order 12345?
+Check status of order 1001
+Show my profile
+Refund order 1001
+I want to complain about order 2222 because the monitor delivery is taking too long
+Refund order 2222 if delivered
+Cancel it
+What issues have I had before?
+Remember I prefer refunds
+My order is late again
+Refund order 0000
+```
+
+Mapping to the project specification:
+
+| # | Function | Demo query |
+|---|---|---|
+| 1 | Intent Parsing | `Where is my order 12345?` |
+| 2 | OrderLookupTool | `Check status of order 1001` |
+| 3 | CustomerProfileTool | `Show my profile` |
+| 4 | RefundTool | `Refund order 1001` |
+| 5 | ComplaintLoggerTool | `I want to complain about order 2222...` |
+| 6 | Multi-step Reasoning | `Refund order 2222 if delivered` |
+| 7 | Short-Term Memory | `Cancel it` |
+| 8 | Long-Term Memory Read | `What issues have I had before?` |
+| 9 | Long-Term Memory Write | `Remember I prefer refunds` |
+| 10 | Personalization | `My order is late again` |
+| 11 | Verifier / invalid order | `Refund order 0000` |
+
+Useful MySQL checks after the demo:
+
+```sql
+SELECT * FROM complaints ORDER BY created_at DESC;
+SELECT * FROM customer_memory ORDER BY created_at DESC;
+SELECT * FROM orders ORDER BY order_id;
 ```

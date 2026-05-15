@@ -41,8 +41,8 @@ CREATE TABLE IF NOT EXISTS complaints (
 CREATE TABLE IF NOT EXISTS customer_memory (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NOT NULL,
-    memory_key VARCHAR(100) NOT NULL,
-    memory_value TEXT NOT NULL,
+    `key` TEXT NOT NULL,
+    `value` TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_memory_customer
         FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
