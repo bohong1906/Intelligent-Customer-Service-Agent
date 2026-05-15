@@ -124,22 +124,15 @@ Refund order 0000
 1. `schema.sql` 直接重跑可能遇到 duplicate index。
    Demo 前建議先 drop 四張 project tables 再 source schema。
 
-2. Planner 目前只提供 structured guidance，例如 intent、entities、recommended_tools、plan。
-   實際是否呼叫工具仍由 ReAct Agent Node 決定，因此 planner 規劃不會強制執行工具。
-   這符合 ReAct 形式，但 demo 結果會受到 LLM tool-calling 判斷影響。
-
-3. LTM 目前是 MySQL `customer_memory` key/value 紀錄。
+2. LTM 目前是 MySQL `customer_memory` key/value 紀錄。
    從 SQL client 看起來會比較像 user interaction log / customer memory log。
-   這基本符合 spec 中 preferences、interaction history、issue patterns 的要求，但展示上不像完整 customer profile。
+   僅基本符合 spec 中 preferences、interaction history、issue patterns 的要求。
 
-4. 個人化目前主要依賴 STM + LTM summary 進 prompt。
+3. 個人化目前主要依賴 STM + LTM summary 進 prompt。
    若 `customer_memory` 內沒有足夠資料，demo 時個人化差異會不明顯。
    可以先跑 `Remember I prefer refunds`、`My order is late again` 後再測 `What issues have I had before?`。
 
-5. `test.py` 目前是 local routing / helper tests，沒有完整覆蓋 PDF 內 11 個 demo query 的端到端 LLM 行為。
-   完整 demo 仍需要人工在同一個 `python main.py` session 中連續輸入 11 個 query。
-
-6. Graph ReAct Loop 次數目前有基本控制。
+4. Graph ReAct Loop 次數目前有基本控制。
    `MAX_TOOL_ITERATIONS` 預設是 4，控制 tool calling loop。
    `MAX_RESPONSE_REVISIONS` 預設是 2，控制 final response 被 verifier 判定 `ISSUE:` 後回到 ReAct Agent Node 重新生成的次數。
    這兩個值可以在 `.env` 覆蓋。
