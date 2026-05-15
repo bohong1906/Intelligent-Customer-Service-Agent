@@ -223,8 +223,6 @@ Example query:
 Check status of order 1001
 ```
 
-### 5. Local Checks
-
 ## Demo Test Flow
 
 Run these in the same `python main.py` session so STM can carry context across turns.
