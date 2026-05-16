@@ -179,9 +179,37 @@ If the database is empty, this is enough:
 mysql -h 127.0.0.1 -P 3306 -u ics_agent -p intelligent_customer_service < schema.sql
 ```
 
-If the tables already exist, first drop the project tables to avoid duplicate index errors:
+If the tables already exist, the easiest way is to use the reset script in this repo root:
 
 ```bash
+chmod +x scripts/reset_db.sh
+./scripts/reset_db.sh
+```
+
+The script:
+
+- reads `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` from `.env`
+- drops the project tables in the correct order
+- rebuilds the schema using the local `schema.sql` path derived from the script location
+
+To inspect the current database contents, run:
+
+```bash
+./scripts/show_db_state.sh
+```
+
+This prints:
+
+- `SHOW TABLES;`
+- `SELECT * FROM customers;`
+- `SELECT * FROM orders;`
+- `SELECT * FROM complaints;`
+- `SELECT * FROM customer_memory;`
+
+If you prefer to run the commands manually, first open MySQL:
+
+```bash
+cd Intelligent-Customer-Service-Agent
 mysql -h 127.0.0.1 -P 3306 -u ics_agent -p intelligent_customer_service
 ```
 
@@ -191,7 +219,7 @@ Then run:
 SET FOREIGN_KEY_CHECKS=0;
 DROP TABLE IF EXISTS customer_memory, complaints, orders, customers;
 SET FOREIGN_KEY_CHECKS=1;
-SOURCE /home/hislab/Intelligent-Customer-Service-Agent/schema.sql;
+SOURCE schema.sql;
 ```
 
 Check the seed data:

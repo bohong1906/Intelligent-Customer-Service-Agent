@@ -1,0 +1,114 @@
+Intelligent Customer Service Agent
+Scenario-based unit testing prompts
+
+基礎資料庫 seed：
+- Customer 1: Alice Chen / alice@example.com
+- Customer 2: Bob Lin / bob@example.com
+- Order 1001: customer_id=1 / Keyboard / shipped
+- Order 2222: customer_id=2 / Monitor / processing
+
+==================================================
+Scenario 1: Alice 基本查詢與無效訂單 (Reset DB , CURRENT_CUSTOMER_ID=1)
+==================================================
+目的:
+- 測試 profile 查詢
+- 測試 Alice 自己的訂單查詢
+- 測試查不到的訂單
+- 測試 invalid refund
+- 驗證 Alice 不能查詢、退款或客訴 Bob 的訂單
+
+Prompt 順序:
+1. Show my profile
+2. Check status of order 1001
+3. Where is my order 12345?
+4. Refund order 0000
+5. Check status of order 2222
+
+==================================================
+Scenario 2: Alice 退款流程與同一 session 的上下文 (Reset DB , CURRENT_CUSTOMER_ID=1)
+==================================================
+目的:
+- 測試退款工具
+- 測試退款後狀態變化
+- 測試 STM 是否能保留前文上下文
+
+Prompt 順序:
+1. Check status of order 1001
+2. Refund order 1001
+3. Check status of order 1001
+4. Cancel it
+
+==================================================
+Scenario 3: Alice 的 long-term memory 寫入與跨 session 讀取 (Reset DB , CURRENT_CUSTOMER_ID=1)
+==================================================
+目的:
+- 寫入 preference memory
+- 寫入 repeated issue memory
+- 驗證 LTM 是否能跨 session 被讀到
+
+Session A:
+Prompt 順序:
+1. Remember I prefer refunds
+2. My order is late again
+
+Session B:
+Prompt 順序:
+1. What issues have I had before?
+
+==================================================
+Scenario 4: Bob 的訂單、客訴與條件式退款 (Reset DB , CURRENT_CUSTOMER_ID=2)
+==================================================
+目的:
+- 測試 Bob 自己的訂單查詢
+- 測試 complaint logging
+- 測試 conditional refund prompt (Multi-step Reasoning)
+
+Prompt 順序:
+1. Show my profile
+2. Check status of order 2222
+3. I want to complain about order 2222 because the monitor delivery is taking too long
+4. Refund order 2222 if delivered
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------------
+==================================================
+11 個 demo query 對應整理
+==================================================
+1. Where is my order 12345?
+   使用 Scenario 1
+
+2. Check status of order 1001
+   使用 Scenario 1 或 Scenario 2
+
+3. Show my profile
+   使用 Scenario 1 或 Scenario 4
+
+4. Refund order 1001
+   使用 Scenario 2
+
+5. I want to complain about order 2222 because the monitor delivery is taking too long
+   使用 Scenario 4
+
+6. Refund order 2222 if delivered
+   使用 Scenario 4
+
+7. Cancel it
+   使用 Scenario 2
+
+8. What issues have I had before?
+   使用 Scenario 3 Session B
+
+9. Remember I prefer refunds
+   使用 Scenario 3 Session A
+
+10. My order is late again
+    使用 Scenario 3 Session A
+
+11. Refund order 0000
+    使用 Scenario 1

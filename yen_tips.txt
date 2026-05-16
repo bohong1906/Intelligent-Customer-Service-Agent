@@ -16,6 +16,8 @@ mysql -h 127.0.0.1 -P 3306 -u ics_agent -p intelligent_customer_service
 SHOW TABLES;
 SELECT * FROM customers;
 SELECT * FROM orders;
+SELECT * FROM complaints;
+SELECT * FROM customer_memory;
 
 
 05/13
@@ -25,3 +27,26 @@ SELECT * FROM orders;
   - checkpointer 包含 recent messages , tool outputs
   - 接起來讓 planner , react 都吃的到 stm
   - planner 部份是先用 messages 傳進去之後，用 format_recent_messages 理解成簡短的文字，再放入 planner 的 prompt
+
+
+05/16
+新增腳本
+  - 重建資料庫: ./scripts/reset_db.sh
+  - 查詢資料庫內容: ./scripts/show_db_state.sh
+
+撰寫單元測試文檔 unit_testing.txt
+
+針對 "跨客戶查詢的保護" 做調整 (Tool Node)
+- `OrderLookupTool` 現在會先檢查 `order_id` 是否屬於 `.env` 中的 `CURRENT_CUSTOMER_ID`
+- `RefundTool` 現在只允許對 active customer 自己的訂單發起退款
+- `CustomerProfileTool` 現在只允許讀取 active customer 自己的 profile
+- `ComplaintLoggerTool` 現在會檢查：
+  - 若有提供 `customer_id`，必須等於 active customer。
+  - 若有提供 `order_id`，該訂單必須屬於 active customer。
+  - 寫入 complaints table 時，會以驗證後的 customer ownership 為準
+- 這個檢查是在 `tools.py` 工具層硬性執行，不依賴 planner 或 prompt 推理
+
+Scenario 3 存在問題
+  - My order is late again 這個問題它不會自己去查 My order 的狀態，要叫我提供 id (尚未解決)
+
+還有資料庫初始化時間的問題， .sql 目前會把配送時間設成當前，會有問題，記得之後要改一下 (尚未解決)

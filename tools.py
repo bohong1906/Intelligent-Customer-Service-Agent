@@ -59,39 +59,91 @@ def error_result(message: str) -> dict[str, Any]:
     return {"ok": False, "error": message}
 
 
+def get_current_customer_id() -> int | None:
+    value = os.getenv("CURRENT_CUSTOMER_ID")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def get_current_customer_id_or_error() -> tuple[int | None, dict[str, Any] | None]:
+    customer_id = get_current_customer_id()
+    if customer_id is None:
+        return None, error_result("Current customer context is unavailable.")
+    return customer_id, None
+
+
+def lookup_order_record(order_id: int) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                o.order_id,
+                o.customer_id,
+                c.name AS customer_name,
+                c.email AS customer_email,
+                o.product_name,
+                o.status,
+                o.order_date,
+                o.delivery_date
+            FROM orders o
+            JOIN customers c ON c.customer_id = o.customer_id
+            WHERE o.order_id = %s
+            """,
+            (order_id,),
+        )
+        return serialize_row(cursor.fetchone())
+
+
+def validate_customer_access(requested_customer_id: int) -> dict[str, Any] | None:
+    current_customer_id, access_error = get_current_customer_id_or_error()
+    if access_error is not None:
+        return access_error
+
+    if requested_customer_id != current_customer_id:
+        return error_result(
+            f"Access denied: customer {requested_customer_id} is not the active customer."
+        )
+
+    return None
+
+
+def validate_order_access(order_id: int) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    current_customer_id, access_error = get_current_customer_id_or_error()
+    if access_error is not None:
+        return None, access_error
+
+    order = lookup_order_record(order_id)
+    if order is None:
+        return None, error_result(f"Order {order_id} was not found.")
+
+    order_customer_id = order.get("customer_id")
+    if order_customer_id is None or int(order_customer_id) != current_customer_id:
+        return None, error_result(
+            f"Access denied: order {order_id} does not belong to the active customer."
+        )
+
+    return order, None
+
+
 def order_lookup_tool(order_id: int) -> dict[str, Any]:
     try:
-        with get_connection() as connection:
-            cursor = connection.cursor(dictionary=True)
-            cursor.execute(
-                """
-                SELECT
-                    o.order_id,
-                    o.customer_id,
-                    c.name AS customer_name,
-                    c.email AS customer_email,
-                    o.product_name,
-                    o.status,
-                    o.order_date,
-                    o.delivery_date
-                FROM orders o
-                JOIN customers c ON c.customer_id = o.customer_id
-                WHERE o.order_id = %s
-                """,
-                (order_id,),
-            )
-            order = serialize_row(cursor.fetchone())
-
-        if order is None:
-            return error_result(f"Order {order_id} was not found.")
-
+        order, access_error = validate_order_access(order_id)
+        if access_error is not None:
+            return access_error
         return {"ok": True, "tool": "OrderLookupTool", "order": order}
-    except MySQLError as exc:
+    except (MySQLError, RuntimeError) as exc:
         return error_result(f"Order lookup failed: {exc}")
 
 
 def customer_profile_tool(customer_id: int) -> dict[str, Any]:
     try:
+        access_error = validate_customer_access(customer_id)
+        if access_error is not None:
+            return access_error
+
         with get_connection() as connection:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(
@@ -108,16 +160,16 @@ def customer_profile_tool(customer_id: int) -> dict[str, Any]:
             return error_result(f"Customer {customer_id} was not found.")
 
         return {"ok": True, "tool": "CustomerProfileTool", "customer": customer}
-    except MySQLError as exc:
+    except (MySQLError, RuntimeError) as exc:
         return error_result(f"Customer profile lookup failed: {exc}")
 
 
 def refund_tool(order_id: int) -> dict[str, Any]:
-    order_result = order_lookup_tool(order_id)
-    if not order_result.get("ok"):
-        return order_result
-
     try:
+        order, access_error = validate_order_access(order_id)
+        if access_error is not None:
+            return access_error
+
         with get_connection() as connection:
             cursor = connection.cursor()
             cursor.execute(
@@ -130,9 +182,9 @@ def refund_tool(order_id: int) -> dict[str, Any]:
             "ok": True,
             "tool": "RefundTool",
             "message": f"Refund request for order {order_id} has been initiated.",
-            "order": order_result["order"],
+            "order": order,
         }
-    except MySQLError as exc:
+    except (MySQLError, RuntimeError) as exc:
         return error_result(f"Refund update failed: {exc}")
 
 
@@ -141,14 +193,22 @@ def complaint_logger_tool(
     order_id: int | None,
     issue: str,
 ) -> dict[str, Any]:
-    if customer_id is None and order_id is not None:
-        order_result = order_lookup_tool(order_id)
-        if not order_result.get("ok"):
-            return order_result
-        customer_id = int(order_result["order"]["customer_id"])
+    current_customer_id, access_error = get_current_customer_id_or_error()
+    if access_error is not None:
+        return access_error
 
-    if customer_id is None:
-        return error_result("Complaint logging needs a customer_id or a valid order_id.")
+    if customer_id is not None and customer_id != current_customer_id:
+        return error_result(
+            f"Access denied: complaint customer {customer_id} is not the active customer."
+        )
+
+    resolved_customer_id = current_customer_id
+
+    if order_id is not None:
+        order, order_access_error = validate_order_access(order_id)
+        if order_access_error is not None:
+            return order_access_error
+        resolved_customer_id = int(order["customer_id"])
 
     try:
         with get_connection() as connection:
@@ -158,7 +218,7 @@ def complaint_logger_tool(
                 INSERT INTO complaints (customer_id, order_id, issue, status)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (customer_id, order_id, issue, "open"),
+                (resolved_customer_id, order_id, issue, "open"),
             )
             complaint_id = cursor.lastrowid
             connection.commit()
@@ -168,8 +228,9 @@ def complaint_logger_tool(
             "tool": "ComplaintLoggerTool",
             "complaint_id": complaint_id,
             "message": "Complaint has been logged.",
+            "customer_id": resolved_customer_id,
         }
-    except MySQLError as exc:
+    except (MySQLError, RuntimeError) as exc:
         return error_result(f"Complaint logging failed: {exc}")
 
 
@@ -210,19 +271,19 @@ def execute_tool(state: dict[str, Any]) -> dict[str, Any]:
 
 @tool("OrderLookupTool")
 def order_lookup_langchain_tool(order_id: int) -> dict[str, Any]:
-    """Retrieve order details from MySQL by order_id."""
+    """Retrieve order details from MySQL by order_id for the active customer only."""
     return order_lookup_tool(order_id)
 
 
 @tool("CustomerProfileTool")
 def customer_profile_langchain_tool(customer_id: int) -> dict[str, Any]:
-    """Retrieve customer profile details from MySQL by customer_id."""
+    """Retrieve customer profile details for the active customer only."""
     return customer_profile_tool(customer_id)
 
 
 @tool("RefundTool")
 def refund_langchain_tool(order_id: int) -> dict[str, Any]:
-    """Request a refund by updating an order status to refund_requested."""
+    """Request a refund for an order owned by the active customer."""
     return refund_tool(order_id)
 
 
@@ -232,7 +293,7 @@ def complaint_logger_langchain_tool(
     customer_id: int | None = None,
     order_id: int | None = None,
 ) -> dict[str, Any]:
-    """Log a customer complaint in MySQL. Use order_id when the complaint is about an order."""
+    """Log a complaint for the active customer. Use order_id only for the active customer's order."""
     return complaint_logger_tool(customer_id=customer_id, order_id=order_id, issue=issue)
 
 
