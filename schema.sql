@@ -1,3 +1,4 @@
+DROP DATABASE IF EXISTS intelligent_customer_service;
 CREATE DATABASE IF NOT EXISTS intelligent_customer_service
 CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
@@ -63,9 +64,11 @@ ON DUPLICATE KEY UPDATE
 
 INSERT INTO orders (order_id, customer_id, product_name, status, order_date, delivery_date)
 VALUES
-    (1001, 1, 'Keyboard', 'shipped', NOW(), NOW()),
-    (2222, 2, 'Monitor', 'processing', NOW(), NULL)
+    (1001, 1, 'Keyboard', 'shipped', '2026-05-10 09:30:00', '2026-05-13 15:45:00'),
+    (2222, 2, 'Monitor', 'processing', '2026-05-28 14:20:00', NULL)
 ON DUPLICATE KEY UPDATE
+    product_name = VALUES(product_name),
     status = VALUES(status),
+    order_date = VALUES(order_date),
     delivery_date = VALUES(delivery_date);
 

@@ -1,3 +1,22 @@
 .env
-LLM project 1.pdf
+.env.*
+!.env.example
+
 __pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+.vscode/
+.idea/
+.DS_Store
+
+.agents/
+/HANDOFF.md
+/yen_tips.txt
+/LLM project 1.pdf
+/schema_demo.sql
+*.zip
+*.docx
